@@ -9,7 +9,7 @@ from tensorflow.keras.applications.efficientnet import preprocess_input
 # Load both models
 @st.cache_resource
 def load_retina_check_model():
-    return load_model("/mnt/data/binary_retina_classifier.keras")
+    return load_model("binary_retina_classifier.keras")
 
 @st.cache_resource
 def load_disease_model():
