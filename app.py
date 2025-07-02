@@ -3,12 +3,67 @@ import streamlit as st
 import numpy as np
 from PIL import Image
 import requests
-import tensorflow as tf 
-from tensorflow.keras.models import load_model 
+import tensorflow as tf
+from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing import image
 from tensorflow.keras.applications.efficientnet import preprocess_input
 
-# Load both models
+
+st.set_page_config(page_title="Eye Image Analyzer", layout="centered")
+
+# -----------------------------
+# Dark Mode Toggle
+# -----------------------------
+dark_mode = st.sidebar.toggle("🌙 Dark Mode", value=True)
+
+# -----------------------------
+# Custom Theme Styling
+# -----------------------------
+if dark_mode:
+    st.markdown(
+        """
+        <style>
+        body {
+            background-color: #0e1117;
+            color: #FAFAFA;
+        }
+        .stApp {
+            background-color: #0e1117;
+            color: #FAFAFA;
+        }
+        .stTextInput > div > div > input {
+            color: white;
+        }
+        .stButton button {
+            background-color: #1f77b4;
+            color: white;
+        }
+        .stMetric {
+            background-color: #1c1c1c !important;
+            padding: 10px;
+            border-radius: 10px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+else:
+    st.markdown(
+        """
+        <style>
+        .stMetric {
+            background-color: #f0f0f0 !important;
+            padding: 10px;
+            border-radius: 10px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+# -----------------------------
+# Load Models
+# -----------------------------
 @st.cache_resource
 def load_retina_check_model():
     return load_model("binary_retina_classifier.keras")
@@ -20,10 +75,14 @@ def load_disease_model():
 retina_model = load_retina_check_model()
 disease_model = load_disease_model()
 
-# Set class names
+# -----------------------------
+# Disease Class Labels
+# -----------------------------
 class_names = ['normal', 'cataract', 'glaucoma', 'diabetic_retinopathy']
 
-# Groq API setup (optional)
+# -----------------------------
+# Groq API for Medical Info
+# -----------------------------
 GROQ_API_KEY = "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"
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
@@ -31,13 +90,16 @@ def get_disease_info(disease_name):
     payload = {
         "model": "llama3-70b-8192",
         "messages": [
-            {"role": "system", "content": "You are a medical assistant..."},
-            {"role": "user", "content": f"Overview of {disease_name}..."}
+            {"role": "system", "content": "You are a helpful medical assistant."},
+            {"role": "user", "content": f"Overview of {disease_name} in simple terms, symptoms and treatment."}
         ],
         "temperature": 0.7,
-        "max_tokens": 100
+        "max_tokens": 150
     }
-    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
     try:
         res = requests.post(GROQ_URL, headers=headers, json=payload)
         if res.status_code == 200:
@@ -46,33 +108,42 @@ def get_disease_info(disease_name):
     except Exception as e:
         return f"Connection error: {str(e)}"
 
-# Streamlit UI
-st.title("👁️ Eye Image Analysis")
-st.write("Upload an eye image. The app will first verify it's a retina image, then classify any disease.")
+# -----------------------------
+# UI Title
+# -----------------------------
+st.markdown(
+    f"<h1 style='text-align: center; color: {'#FAFAFA' if dark_mode else '#1c1c1c'};'>👁️ Eye Image Analyzer</h1>",
+    unsafe_allow_html=True
+)
+st.write("Upload a retina image for verification and disease classification using AI.")
 
-uploaded_file = st.file_uploader("Choose an eye image...", type=["jpg", "jpeg", "png"])
+# -----------------------------
+# File Upload
+# -----------------------------
+uploaded_file = st.file_uploader("📤 Choose an eye image...", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
     img = Image.open(uploaded_file).convert('RGB')
-    st.image(img, caption='Uploaded Image', use_container_width=True)
+    st.image(img, caption='🖼️ Uploaded Image',width=300)
 
-    # Preprocess
     img_size = (256, 256)
     img_resized = img.resize(img_size)
     img_array = image.img_to_array(img_resized)
     img_array = np.expand_dims(img_array, axis=0)
     img_array = preprocess_input(img_array)
 
-    # Step 1: Retina image verification
-    with st.spinner("🔎 Checking if this is a retina image..."):
+    # Retina Verification
+    with st.spinner("🔍 Verifying retina image..."):
         retina_pred = retina_model.predict(img_array)[0][0]
         is_retina = retina_pred > 0.5
 
     if not is_retina:
-        st.error("🚫 This image does not appear to be a valid retinal image. Please upload a proper retina scan.")
+        st.error("🚫 Not a valid retinal image. Please upload a proper retina scan.")
     else:
-        st.success("✅ Retina image confirmed.")
-        with st.spinner("🧠 Analyzing for eye disease..."):
+        st.success("✅ Retina image verified.")
+
+        # Disease Prediction
+        with st.spinner("🧠 Analyzing image for eye disease..."):
             disease_pred = disease_model.predict(img_array)
             if disease_pred.shape[1] == 1:
                 pred_class = int(disease_pred[0][0] > 0.5)
@@ -82,25 +153,26 @@ if uploaded_file is not None:
                 confidence = np.max(disease_pred)
 
         predicted_condition = class_names[pred_class]
-        
-        # Display result
+
         col1, col2 = st.columns(2)
         with col1:
             st.metric("🏷️ Predicted Condition", predicted_condition.replace("_", " ").title())
         with col2:
             st.metric("📊 Confidence", f"{confidence:.1%}")
 
-        # Step 3: Medical Info if disease
         if predicted_condition != "normal":
             st.markdown("---")
-            st.markdown("### 📋 Medical Info")
-            with st.spinner("Getting medical info..."):
+            st.subheader("📋 Medical Info")
+            with st.spinner("Fetching medical explanation..."):
                 info = get_disease_info(predicted_condition)
-            st.markdown(info)
-            st.warning("⚠️ This is not medical advice. Please consult a doctor.")
+            st.markdown(f"<div style='color: {'#FAFAFA' if dark_mode else '#000000'}'>{info}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='color: {'#ff4b4b'}'><b>⚠️ This is not a medical diagnosis. Always consult a doctor.</b></div>", unsafe_allow_html=True)
         else:
-            st.success("🎉 Eye appears to be healthy. Keep up regular checkups!")
+            st.success("🎉 Eye appears healthy. Keep up with regular checkups!")
 
-# Sidebar info
+# -----------------------------
+# Sidebar Info
+# -----------------------------
 st.sidebar.markdown("### ℹ️ About")
-st.sidebar.write("This tool verifies if an image is a retina scan and classifies diseases using AI.")
+st.sidebar.info("This tool verifies if an image is a retina scan and classifies eye diseases using AI.")
+
